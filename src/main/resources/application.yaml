@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: recommendation-service
+  mvc:
+    servlet:
+      path: /api/v1
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger
+    operations-sorter: method
+    tags-sorter: alpha
+
+logging:
+  level:
+    root: INFO
+  file:
+    name: /logs/recommendation-service.log
+  structured:
+    format:
+      file: ecs # Loki supports it
+    json:
+      exclude: ecs
