@@ -56,5 +56,20 @@ logging:
   structured:
     format:
       file: ecs # Loki supports it
+      console: ecs
     json:
       exclude: ecs
+
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        recommendation.response.duration: true
+        recommendation.llm.duration: true

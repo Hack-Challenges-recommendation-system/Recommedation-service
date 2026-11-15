@@ -56,6 +56,7 @@ public class RecommendationService {
     private final CandidateService candidateService;
     private final LlmRankingService llmRankingService;
     private final ExperimentService experimentService;
+    private final RecommendationTelemetry telemetry;
     private final RecommendationProperties properties;
     private final Cache<CacheKey, RecommendationListServiceDto> cache;
 
@@ -66,6 +67,7 @@ public class RecommendationService {
             CandidateService candidateService,
             LlmRankingService llmRankingService,
             ExperimentService experimentService,
+            RecommendationTelemetry telemetry,
             RecommendationProperties properties
     ) {
         this.profileClient = profileClient;
@@ -74,6 +76,7 @@ public class RecommendationService {
         this.candidateService = candidateService;
         this.llmRankingService = llmRankingService;
         this.experimentService = experimentService;
+        this.telemetry = telemetry;
         this.properties = properties;
         // A baseline list expires sooner, so a failed LLM call is retried soon but not on every request
         this.cache = Caffeine.newBuilder()
@@ -112,6 +115,8 @@ public class RecommendationService {
             cache.put(key, list);
         }
 
+        long elapsedNanos = System.nanoTime() - startedAt;
+        telemetry.served(list, cached != null, elapsedNanos);
         log.atInfo()
                 .setMessage("Recommendations are served")
                 .addKeyValue("userId", userId)
@@ -120,7 +125,7 @@ public class RecommendationService {
                 .addKeyValue("engine", list.engine())
                 .addKeyValue("materialIds", list.items().stream().map(item -> item.material().id()).toList())
                 .addKeyValue("cached", cached != null)
-                .addKeyValue("latencyMs", Duration.ofNanos(System.nanoTime() - startedAt).toMillis())
+                .addKeyValue("latencyMs", Duration.ofNanos(elapsedNanos).toMillis())
                 .log();
         return list;
     }
@@ -128,6 +133,7 @@ public class RecommendationService {
     private RecommendationListServiceDto build(String variant, ProfileServiceDto profile, List<EventServiceDto> history) {
         List<CandidateServiceDto> candidates = candidateService.findCandidates(profile, history);
         if (candidates.isEmpty()) {
+            telemetry.fallback("no_candidates");
             return new RecommendationListServiceDto(
                     UUID.randomUUID(), variant, Engine.BASELINE, baselineQuestion(profile, candidates), null, List.of()
             );
@@ -153,8 +159,10 @@ public class RecommendationService {
                 }
 
                 log.atWarn().setMessage("The LLM chose no valid candidate; answering with the baseline").log();
+                telemetry.fallback("invalid_ranking");
                 return baseline(variant, profile, candidates, question);
             } catch (LlmRankingException e) {
+                telemetry.fallback("llm_error");
                 log.atWarn()
                         .setMessage("LLM ranking failed; answering with the baseline")
                         .addKeyValue("reason", e.getMessage())
@@ -162,6 +170,9 @@ public class RecommendationService {
             }
         }
 
+        if (ExperimentService.LLM_VARIANT.equals(variant) && !llmRankingService.isAvailable()) {
+            telemetry.fallback("llm_unavailable");
+        }
         return baseline(variant, profile, candidates, null);
     }
 

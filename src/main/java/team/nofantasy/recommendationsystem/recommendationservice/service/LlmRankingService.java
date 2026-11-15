@@ -132,6 +132,7 @@ public class LlmRankingService {
 
     private final ObjectProvider<ChatModel> chatModelProvider;
     private final JsonMapper jsonMapper;
+    private final RecommendationTelemetry telemetry;
     private final String apiKey;
     private final String model;
     private final int maxTokens;
@@ -141,12 +142,14 @@ public class LlmRankingService {
             ObjectProvider<ChatModel> chatModelProvider,
             JsonMapper jsonMapper,
             RecommendationProperties properties,
+            RecommendationTelemetry telemetry,
             @Value("${spring.ai.anthropic.api-key:}") String apiKey,
             @Value("${spring.ai.anthropic.chat.model}") String model,
             @Value("${spring.ai.anthropic.chat.max-tokens}") int maxTokens
     ) {
         this.chatModelProvider = chatModelProvider;
         this.jsonMapper = jsonMapper;
+        this.telemetry = telemetry;
         this.apiKey = apiKey;
         this.model = model;
         this.maxTokens = maxTokens;
@@ -186,15 +189,22 @@ public class LlmRankingService {
         Prompt prompt = new Prompt(List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(request)), options());
 
         long startedAt = System.nanoTime();
-        ChatResponse response;
+        String outcome = "error";
         try {
-            response = chatModel.call(prompt);
-        } catch (RuntimeException e) {
-            throw new LlmRankingException("LLM call failed: " + describe(e), e);
-        }
+            ChatResponse response;
+            try {
+                response = chatModel.call(prompt);
+            } catch (RuntimeException e) {
+                throw new LlmRankingException("LLM call failed: " + describe(e), e);
+            }
 
-        logUsage(response, candidates.size(), startedAt);
-        return withMaterialIds(parse(answerText(response)), candidates);
+            logUsage(response, candidates.size(), startedAt);
+            LlmRankingServiceDto ranking = withMaterialIds(parse(answerText(response)), candidates);
+            outcome = "success";
+            return ranking;
+        } finally {
+            telemetry.llmCall(outcome, System.nanoTime() - startedAt);
+        }
     }
 
     /**
@@ -365,6 +375,11 @@ public class LlmRankingService {
     private void logUsage(ChatResponse response, int candidates, long startedAt) {
         Usage usage = response == null || response.getMetadata() == null ? null : response.getMetadata().getUsage();
         Generation result = response == null ? null : response.getResult();
+        if (usage != null) {
+            Number input = usage.getPromptTokens();
+            Number output = usage.getCompletionTokens();
+            telemetry.llmTokens(input == null ? 0 : input.longValue(), output == null ? 0 : output.longValue());
+        }
 
         log.atInfo()
                 .setMessage("LLM ranked the candidates")

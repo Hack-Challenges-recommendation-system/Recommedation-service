@@ -65,6 +65,7 @@ class LlmRankingServiceTest {
                 beans.getBeanProvider(ChatModel.class),
                 TestFixtures.JSON,
                 TestFixtures.properties(100),
+                mock(RecommendationTelemetry.class),
                 apiKey,
                 "claude-sonnet-5-5",
                 8000

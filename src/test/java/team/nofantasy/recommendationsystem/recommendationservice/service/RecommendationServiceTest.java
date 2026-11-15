@@ -54,6 +54,8 @@ class RecommendationServiceTest {
     private CandidateService candidateService;
     @Mock
     private LlmRankingService llmRankingService;
+    @Mock
+    private RecommendationTelemetry telemetry;
 
     private final UUID userId = UUID.randomUUID();
 
@@ -64,7 +66,7 @@ class RecommendationServiceTest {
         RecommendationProperties properties = TestFixtures.properties(3, 40, llmShare);
         return new RecommendationService(
                 profileClient, metricClient, catalogService, candidateService, llmRankingService,
-                new ExperimentService(properties), properties
+                new ExperimentService(properties), telemetry, properties
         );
     }
 
