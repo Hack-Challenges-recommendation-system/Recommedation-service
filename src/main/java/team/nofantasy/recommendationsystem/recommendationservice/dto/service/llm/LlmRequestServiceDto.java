@@ -28,6 +28,9 @@ public record LlmRequestServiceDto(
     ) {
     }
 
+    /**
+     * @param access {@code SUBSCRIPTION} or {@code PURCHASE}; left out for a free material.
+     */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     public record Candidate(
             String id,
@@ -40,6 +43,7 @@ public record LlmRequestServiceDto(
             List<String> businessStages,
             List<String> spheres,
             boolean paid,
+            String access,
             Signals signals
     ) {
     }
@@ -47,15 +51,17 @@ public record LlmRequestServiceDto(
     /**
      * Why a material is a candidate; a signal that doesn't apply is left out.
      *
-     * @param topicMatch full-text match with the goal.
+     * @param topicMatch full-text match with the goal and sphere.
      * @param popularUsers entrepreneurs who started or completed it.
      * @param takenAfter a material from the history that people often take before this one.
+     * @param similarTo a material from the history that shares topics with this one.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Signals(
             Double topicMatch,
             Long popularUsers,
             String takenAfter,
+            String similarTo,
             Boolean stageMatch,
             Boolean preferredFormat
     ) {

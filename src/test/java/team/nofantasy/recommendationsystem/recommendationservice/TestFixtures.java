@@ -52,7 +52,7 @@ public final class TestFixtures {
     }
 
     public static CandidateServiceDto candidate(String id, double topicMatch) {
-        return new CandidateServiceDto(material(id), topicMatch, 0, null, false, false);
+        return new CandidateServiceDto(material(id), topicMatch, 0, null, null, false, false);
     }
 
     public static RecommendationProperties properties(int items, int maxCandidates, int llmShare) {

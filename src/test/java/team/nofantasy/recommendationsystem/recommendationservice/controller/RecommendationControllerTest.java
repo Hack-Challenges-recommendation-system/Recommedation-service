@@ -48,6 +48,7 @@ class RecommendationControllerTest {
                 "llm",
                 Engine.LLM,
                 null,
+                "Начните с переговоров, затем закрепите результат",
                 List.of(new RecommendationItemServiceDto(
                         TestFixtures.material("m-008"), "Скрипты помогут на первых звонках", "Позвоните трём клиентам", 0
                 ))
@@ -59,8 +60,10 @@ class RecommendationControllerTest {
                 .andExpect(jsonPath("$.variant").value("llm"))
                 .andExpect(jsonPath("$.engine").value("llm"))
                 .andExpect(jsonPath("$.clarifyingQuestion").isEmpty())
+                .andExpect(jsonPath("$.orderExplanation").value("Начните с переговоров, затем закрепите результат"))
                 .andExpect(jsonPath("$.items[0].material.id").value("m-008"))
                 .andExpect(jsonPath("$.items[0].material.paid").value(true))
+                .andExpect(jsonPath("$.items[0].material.access").value("PURCHASE"))
                 .andExpect(jsonPath("$.items[0].material.url").value("https://partner.example.com/negotiations"))
                 .andExpect(jsonPath("$.items[0].material.topics[0]").value("продажи"))
                 .andExpect(jsonPath("$.items[0].reason").value("Скрипты помогут на первых звонках"))

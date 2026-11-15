@@ -47,6 +47,7 @@ public class RecommendationService {
     private static final int REASON_LIMIT = 400;
     private static final int NEXT_STEP_LIMIT = 200;
     private static final int QUESTION_LIMIT = 300;
+    private static final int EXPLANATION_LIMIT = 400;
     private static final int CACHE_SIZE = 10_000;
 
     private final ProfileClient profileClient;
@@ -128,7 +129,7 @@ public class RecommendationService {
         List<CandidateServiceDto> candidates = candidateService.findCandidates(profile, history);
         if (candidates.isEmpty()) {
             return new RecommendationListServiceDto(
-                    UUID.randomUUID(), variant, Engine.BASELINE, baselineQuestion(profile, candidates), List.of()
+                    UUID.randomUUID(), variant, Engine.BASELINE, baselineQuestion(profile, candidates), null, List.of()
             );
         }
 
@@ -140,7 +141,15 @@ public class RecommendationService {
                 String question = clean(ranking.clarifyingQuestion(), QUESTION_LIMIT);
                 List<RecommendationItemServiceDto> items = toItems(ranking, candidates, profile);
                 if (!items.isEmpty()) {
-                    return new RecommendationListServiceDto(UUID.randomUUID(), variant, Engine.LLM, question, items);
+                    String explanation = clean(ranking.orderExplanation(), EXPLANATION_LIMIT);
+                    return new RecommendationListServiceDto(
+                            UUID.randomUUID(),
+                            variant,
+                            Engine.LLM,
+                            question,
+                            explanation != null ? explanation : Explanations.order(chosen(items, candidates), profile),
+                            items
+                    );
                 }
 
                 log.atWarn().setMessage("The LLM chose no valid candidate; answering with the baseline").log();
@@ -165,8 +174,9 @@ public class RecommendationService {
             List<CandidateServiceDto> candidates,
             String question
     ) {
+        List<CandidateServiceDto> shown = candidates.subList(0, Math.min(properties.items(), candidates.size()));
         List<RecommendationItemServiceDto> items = new ArrayList<>();
-        for (CandidateServiceDto candidate : candidates.subList(0, Math.min(properties.items(), candidates.size()))) {
+        for (CandidateServiceDto candidate : shown) {
             items.add(new RecommendationItemServiceDto(
                     candidate.material(),
                     Explanations.reason(candidate, profile),
@@ -180,8 +190,21 @@ public class RecommendationService {
                 variant,
                 Engine.BASELINE,
                 question != null ? question : baselineQuestion(profile, candidates),
+                Explanations.order(shown, profile),
                 List.copyOf(items)
         );
+    }
+
+    /**
+     * The candidates behind the items of a list, in the order of the list.
+     */
+    private static List<CandidateServiceDto> chosen(
+            List<RecommendationItemServiceDto> items,
+            List<CandidateServiceDto> candidates
+    ) {
+        Map<String, CandidateServiceDto> candidatesById = new HashMap<>();
+        candidates.forEach(candidate -> candidatesById.putIfAbsent(candidate.material().id(), candidate));
+        return items.stream().map(item -> candidatesById.get(item.material().id())).toList();
     }
 
     /**
@@ -259,7 +282,12 @@ public class RecommendationService {
 
     private static RecommendationListServiceDto withNewId(RecommendationListServiceDto list) {
         return new RecommendationListServiceDto(
-                UUID.randomUUID(), list.variant(), list.engine(), list.clarifyingQuestion(), list.items()
+                UUID.randomUUID(),
+                list.variant(),
+                list.engine(),
+                list.clarifyingQuestion(),
+                list.orderExplanation(),
+                list.items()
         );
     }
 

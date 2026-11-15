@@ -8,10 +8,12 @@ import java.util.Objects;
  * the candidates before anything is shown.
  *
  * @param items chosen candidates, best first.
+ * @param orderExplanation why the items go in this order.
  * @param clarifyingQuestion empty when the model has no question.
  */
 public record LlmRankingServiceDto(
         List<Pick> items,
+        String orderExplanation,
         String clarifyingQuestion
 ) {
     public LlmRankingServiceDto {

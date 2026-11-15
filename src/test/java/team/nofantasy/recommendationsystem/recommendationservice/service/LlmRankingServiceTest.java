@@ -41,12 +41,21 @@ class LlmRankingServiceTest {
     private static final String ANSWER = """
             {"items": [{"id": "m-005", "reason": "Бесплатное продвижение для первых покупателей",
                         "nextStep": "Опубликуйте первый пост о магазине"}],
+             "orderExplanation": "Начните с бесплатного продвижения",
              "clarifyingQuestion": ""}
             """;
 
     private final ChatModel chatModel = mock(ChatModel.class);
     private final List<CandidateServiceDto> candidates = List.of(
-            new CandidateServiceDto(TestFixtures.material("m-005"), 0.23456, 12, "Воронка продаж для малого бизнеса", true, true),
+            new CandidateServiceDto(
+                    TestFixtures.material("m-005"),
+                    0.23456,
+                    12,
+                    "Воронка продаж для малого бизнеса",
+                    new CandidateServiceDto.HistorySource("Как найти первых клиентов", "LIKE"),
+                    true,
+                    true
+            ),
             TestFixtures.candidate("m-008", 0)
     );
 
@@ -75,10 +84,15 @@ class LlmRankingServiceTest {
         assertThat(request)
                 .doesNotContain("ivan@example.com", "999 123")
                 .contains("[email]", "[phone]", "\"businessStage\":\"LAUNCH\"", "\"items\":6")
-                .contains("\"id\":\"m-005\"", "\"topicMatch\":0.235", "\"popularUsers\":12", "\"takenAfter\":\"Воронка продаж для малого бизнеса\"")
+                .doesNotContain("\"id\":\"m-005\"")
+                .contains("\"id\":\"c1\"", "\"topicMatch\":0.235", "\"popularUsers\":12", "\"takenAfter\":\"Воронка продаж для малого бизнеса\"")
+                .contains("\"similarTo\":\"Как найти первых клиентов\"")
                 .contains("\"title\":\"Налоги для ИП: какой режим выбрать\"");
+        var requestCandidates = TestFixtures.JSON.readTree(request).get("candidates");
         // m-008 has no signal, so it has no signals object
-        assertThat(TestFixtures.JSON.readTree(request).get("candidates").get(1).has("signals")).isFalse();
+        assertThat(requestCandidates.get(1).has("signals")).isFalse();
+        assertThat(requestCandidates.get(1).get("access").asString()).as("m-008 is paid").isEqualTo("PURCHASE");
+        assertThat(requestCandidates.get(0).has("access")).as("a free material has no access").isFalse();
     }
 
     @Test
@@ -88,6 +102,7 @@ class LlmRankingServiceTest {
         LlmRankingServiceDto ranking = service("key").rank(PROFILE, List.of(), candidates, 6);
 
         assertThat(ranking.items()).extracting(LlmRankingServiceDto.Pick::id).containsExactly("m-005");
+        assertThat(ranking.orderExplanation()).isEqualTo("Начните с бесплатного продвижения");
         assertThat(ranking.clarifyingQuestion()).isEmpty();
 
         ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
@@ -96,11 +111,41 @@ class LlmRankingServiceTest {
         assertThat(options.getModel()).isEqualTo("claude-sonnet-5-5");
         assertThat(options.getMaxTokens()).isEqualTo(8000);
         assertThat(options.getOutputConfig().effort()).contains(OutputConfig.Effort.MEDIUM);
-        assertThat(options.getOutputSchema()).contains("\"clarifyingQuestion\"");
+        assertThat(options.getOutputSchema()).contains("\"clarifyingQuestion\"", "\"orderExplanation\"");
         assertThat(options.getTemperature()).as("current models reject temperature").isNull();
         assertThat(options.getTopP()).isNull();
         assertThat(options.getTopK()).isNull();
         assertThat(options.getThinking()).as("thinking stays adaptive").isNull();
+    }
+
+    @Test
+    void shortIdsOfTheAnswerBecomeMaterialIds() {
+        when(chatModel.call(any(Prompt.class))).thenReturn(response("""
+                {"items": [{"id": " c2 ", "reason": "Переговоры", "nextStep": "Позвоните"},
+                           {"id": "c1", "reason": "Продвижение", "nextStep": "Опубликуйте пост"},
+                           {"id": "c9", "reason": "Нет такого", "nextStep": "-"}],
+                 "orderExplanation": "", "clarifyingQuestion": ""}
+                """));
+
+        LlmRankingServiceDto ranking = service("key").rank(PROFILE, List.of(), candidates, 6);
+
+        // c9 isn't a candidate: it stays as it is, and validation leaves it out
+        assertThat(ranking.items()).extracting(LlmRankingServiceDto.Pick::id).containsExactly("m-008", "m-005", "c9");
+    }
+
+    @Test
+    void shortIdsNeverReachTheTexts() {
+        when(chatModel.call(any(Prompt.class))).thenReturn(response("""
+                {"items": [{"id": "c1", "reason": "После c2 закрепит результат", "nextStep": "Откройте курс (c1)"}],
+                 "orderExplanation": "Сначала основа (курс c1), затем переговоры (c2) и c9.",
+                 "clarifyingQuestion": ""}
+                """));
+
+        LlmRankingServiceDto ranking = service("key").rank(PROFILE, List.of(), candidates, 6);
+
+        assertThat(ranking.orderExplanation()).isEqualTo("Сначала основа, затем переговоры и c9.");
+        assertThat(ranking.items().getFirst().reason()).isEqualTo("После «Переговоры с первыми клиентами» закрепит результат");
+        assertThat(ranking.items().getFirst().nextStep()).isEqualTo("Откройте курс");
     }
 
     @Test

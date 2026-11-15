@@ -57,6 +57,7 @@ class LiveAnthropicRankingTest {
                         0,
                         0,
                         null,
+                        null,
                         CandidateService.isStageMatch(material, profile),
                         CandidateService.isFormatMatch(material, profile)
                 ))

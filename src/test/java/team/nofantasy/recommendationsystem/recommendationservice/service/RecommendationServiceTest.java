@@ -95,13 +95,14 @@ class RecommendationServiceTest {
                 new Pick("m-005", "Повтор", "Повтор"),
                 new Pick("m-008", "Скрипты для первых звонков", "Позвоните трём клиентам"),
                 new Pick("m-003", "Не помещается в список", "-")
-        ), ""));
+        ), "  Сначала продвижение, затем звонки  ", ""));
 
         RecommendationListServiceDto list = service(100).getRecommendations(userId);
 
         assertThat(list.engine()).isEqualTo(Engine.LLM);
         assertThat(list.variant()).isEqualTo(ExperimentService.LLM_VARIANT);
         assertThat(list.clarifyingQuestion()).isNull();
+        assertThat(list.orderExplanation()).isEqualTo("Сначала продвижение, затем звонки");
         assertThat(ids(list)).containsExactly("m-005", "m-001", "m-008");
         assertThat(list.items()).extracting(RecommendationItemServiceDto::position).containsExactly(0, 1, 2);
         assertThat(list.items().getFirst().reason()).isEqualTo("Бесплатное продвижение для первых покупателей");
@@ -127,6 +128,24 @@ class RecommendationServiceTest {
             assertThat(item.nextStep()).isNotBlank();
         });
         assertThat(list.clarifyingQuestion()).isNull();
+        assertThat(list.orderExplanation())
+                .isEqualTo("В подборке — материалы, которые ближе всего к вашей задаче: самые подходящие идут первыми.");
+    }
+
+    @Test
+    void llmAnswerWithoutOrderExplanationGetsOneFromTheSignals() {
+        givenUser(PROFILE, CANDIDATES);
+        givenLlmAnswers(new LlmRankingServiceDto(List.of(
+                new Pick("m-001", "Причина", "Шаг"),
+                new Pick("m-003", "Причина", "Шаг")
+        ), " ", ""));
+
+        RecommendationListServiceDto list = service(100).getRecommendations(userId);
+
+        assertThat(list.engine()).isEqualTo(Engine.LLM);
+        assertThat(list.orderExplanation()).isEqualTo(
+                "Сначала — материалы, которые ближе всего к вашей задаче, затем — материалы на другие темы из каталога."
+        );
     }
 
     @Test
@@ -143,7 +162,7 @@ class RecommendationServiceTest {
     @Test
     void noValidPickGivesTheBaselineWithTheQuestionOfTheLlm() {
         givenUser(PROFILE, CANDIDATES);
-        givenLlmAnswers(new LlmRankingServiceDto(List.of(new Pick("m-404", "-", "-")), "Что продаёт ваш магазин?"));
+        givenLlmAnswers(new LlmRankingServiceDto(List.of(new Pick("m-404", "-", "-")), "", "Что продаёт ваш магазин?"));
 
         RecommendationListServiceDto list = service(100).getRecommendations(userId);
 
@@ -155,7 +174,7 @@ class RecommendationServiceTest {
     @Test
     void sameProfileAndHistoryAreServedFromTheCache() {
         givenUser(PROFILE, CANDIDATES);
-        givenLlmAnswers(new LlmRankingServiceDto(List.of(new Pick("m-005", "Причина", "Шаг")), ""));
+        givenLlmAnswers(new LlmRankingServiceDto(List.of(new Pick("m-005", "Причина", "Шаг")), "Порядок", ""));
         RecommendationService service = service(100);
 
         RecommendationListServiceDto first = service.getRecommendations(userId);
@@ -186,6 +205,17 @@ class RecommendationServiceTest {
 
         verify(candidateService).findCandidates(eq(ProfileServiceDto.EMPTY), any());
         assertThat(list.items()).hasSize(3);
+        assertThat(list.clarifyingQuestion()).isEqualTo(RecommendationService.NO_GOAL_QUESTION);
+    }
+
+    @Test
+    void newUserGetsAStarterSetWithItsOrderExplained() {
+        givenUser(ProfileServiceDto.EMPTY, List.of(TestFixtures.candidate("m-001", 0), TestFixtures.candidate("m-002", 0)));
+        when(llmRankingService.isAvailable()).thenReturn(false);
+
+        RecommendationListServiceDto list = service(100).getRecommendations(userId);
+
+        assertThat(list.orderExplanation()).startsWith("Это стартовая подборка");
         assertThat(list.clarifyingQuestion()).isEqualTo(RecommendationService.NO_GOAL_QUESTION);
     }
 

@@ -19,6 +19,7 @@ import team.nofantasy.recommendationsystem.recommendationservice.dto.service.cat
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
@@ -144,13 +145,14 @@ class RecommendationIntegrationTest {
         stubUser(userId);
         stubLlmAnswer("""
                 {"items": [
-                  {"id": "m-005", "reason": "Бесплатное продвижение подойдёт для первых покупателей магазина",
+                  {"id": "c3", "reason": "Бесплатное продвижение подойдёт для первых покупателей магазина",
                    "nextStep": "Опубликуйте первый пост о магазине"},
-                  {"id": "m-999", "reason": "Выдуманный материал", "nextStep": "-"},
-                  {"id": "m-001", "reason": "Пошаговый план поиска первых клиентов", "nextStep": "Составьте список из 10 знакомых"},
-                  {"id": "m-001", "reason": "Повтор", "nextStep": "Повтор"},
+                  {"id": "c99", "reason": "Выдуманный материал", "nextStep": "-"},
+                  {"id": "c1", "reason": "Пошаговый план поиска первых клиентов", "nextStep": "Составьте список из 10 знакомых"},
+                  {"id": "c1", "reason": "Повтор", "nextStep": "Повтор"},
                   {"id": "m-002", "reason": "Уже пройден", "nextStep": "-"}
                  ],
+                 "orderExplanation": "Сначала бесплатное продвижение, затем план поиска клиентов",
                  "clarifyingQuestion": ""}
                 """);
 
@@ -159,6 +161,7 @@ class RecommendationIntegrationTest {
                 .andExpect(jsonPath("$.engine").value("llm"))
                 .andExpect(jsonPath("$.variant").value("llm"))
                 .andExpect(jsonPath("$.clarifyingQuestion").isEmpty())
+                .andExpect(jsonPath("$.orderExplanation").value("Сначала бесплатное продвижение, затем план поиска клиентов"))
                 .andExpect(jsonPath("$.items.length()").value(2))
                 .andExpect(jsonPath("$.items[0].material.id").value("m-005"))
                 .andExpect(jsonPath("$.items[0].material.url").value("https://example.com/materials/m-005"))
@@ -179,9 +182,15 @@ class RecommendationIntegrationTest {
 
         Object content = JsonPath.read(body, "$.messages[0].content");
         String userMessage = content instanceof String text ? text : JsonPath.read(body, "$.messages[0].content[0].text");
-        List<String> candidates = JsonPath.read(userMessage, "$.candidates[*].id");
-        assertThat(candidates).as("completed m-002 is not a candidate")
-                .containsExactly("m-001", "m-008", "m-005", "m-003", "m-004", "m-006", "m-007");
+        List<String> candidateIds = JsonPath.read(userMessage, "$.candidates[*].id");
+        assertThat(candidateIds).as("the model sees short ids").containsExactly("c1", "c2", "c3", "c4", "c5", "c6", "c7");
+        List<String> candidates = JsonPath.read(userMessage, "$.candidates[*].title");
+        assertThat(candidates).as("completed m-002 is not a candidate; m-004 shares «финансы» with it")
+                .containsExactly(Stream.of("m-001", "m-008", "m-005", "m-004", "m-003", "m-006", "m-007")
+                        .map(id -> TestFixtures.material(id).title())
+                        .toArray(String[]::new));
+        assertThat((String) JsonPath.read(userMessage, "$.candidates[3].signals.similarTo"))
+                .isEqualTo("Налоги для ИП: какой режим выбрать");
         List<String> history = JsonPath.read(userMessage, "$.history[*].materialId");
         assertThat(history).as("impressions are not history").containsExactly("m-003", "m-002");
     }
@@ -220,6 +229,10 @@ class RecommendationIntegrationTest {
                 .andExpect(jsonPath("$.items[0].material.id").value("m-001"))
                 .andExpect(jsonPath("$.items[0].reason").value("Совпадает с вашей задачей по темам: маркетинг, продажи"))
                 .andExpect(jsonPath("$.items[1].material.id").value("m-008"))
-                .andExpect(jsonPath("$.items[2].material.id").value("m-005"));
+                .andExpect(jsonPath("$.items[2].material.id").value("m-005"))
+                .andExpect(jsonPath("$.items[3].reason")
+                        .value("Продолжает тему материала «Налоги для ИП: какой режим выбрать», который вы изучили"))
+                .andExpect(jsonPath("$.orderExplanation").value(org.hamcrest.Matchers.startsWith(
+                        "Сначала — материалы, которые ближе всего к вашей задаче, затем — ")));
     }
 }
