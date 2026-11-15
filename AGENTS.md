@@ -13,7 +13,7 @@ Builds the personal list of materials. The vendor LLM ranks and explains; this s
 
 ## Planned request pipeline
 
-1. **Context:** the profile from profile-service (`GET /profiles/me` with the caller's `X-User-Id`), recent events from metric-service (`GET /events/me`), the catalog from catalog-service (cache it in memory).
+1. **Context:** the profile from profile-service (`GET /profile/me` with the caller's `X-User-Id`), recent events from metric-service (`GET /events/me`), the catalog from catalog-service (cache it in memory).
 2. **Candidates:** 30–50 materials. Drop completed and unavailable ones, match the goal text with `GET /materials/search`, add `GET /metrics/materials/popular` and `GET /metrics/materials/{id}/next`. Sorted by text match, this list is the topic-match baseline the case asks to compare against.
 3. **LLM:** send the candidates and the business fields of the profile. Get back JSON with ordered ids, a reason for each, a next step, or a clarifying question when nothing fits.
 4. **Validation:** ids must be among the candidates, links come from the catalog, and paid materials keep only their benefit and provided link.
