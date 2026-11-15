@@ -1,2 +1,5 @@
 .idea/
+.claude/
 target/
+.env
+/data/

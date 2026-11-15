@@ -1,0 +1,7 @@
+app:
+  catalog:
+    import-path: classpath:fixtures/catalog.json
+
+logging:
+  file:
+    name: ""

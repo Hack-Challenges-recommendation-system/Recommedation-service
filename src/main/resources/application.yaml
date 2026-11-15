@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: catalog-service
+  mvc:
+    servlet:
+      path: /api/v1
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5437/postgres}
+    username: ${DB_USERNAME:admin}
+    password: ${DB_PASSWORD:admin}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+    show-sql: false
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:database/migrations
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger
+    operations-sorter: method
+    tags-sorter: alpha
+
+logging:
+  level:
+    root: INFO
+  file:
+    name: /logs/catalog-service.log
+  structured:
+    format:
+      file: ecs # Loki supports it
+    json:
+      exclude: ecs
+
+app:
+  catalog:
+    # e.g. file:/data/catalog.json; empty skips the import
+    import-path: ${CATALOG_IMPORT_PATH:}

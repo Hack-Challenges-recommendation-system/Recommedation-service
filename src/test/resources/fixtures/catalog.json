@@ -1,0 +1,59 @@
+[
+  {
+    "id": "m-001",
+    "title": "Как найти первых клиентов",
+    "summary": "Пошаговый план поиска первых покупателей для нового бизнеса",
+    "format": "ARTICLE",
+    "durationMinutes": 10,
+    "level": "BEGINNER",
+    "topics": ["маркетинг", "продажи"],
+    "businessStages": ["LAUNCH"],
+    "spheres": ["retail", "services"],
+    "paid": false,
+    "url": "https://example.com/materials/m-001"
+  },
+  {
+    "id": "m-002",
+    "title": "Налоги для ИП: какой режим выбрать",
+    "summary": "Сравнение налоговых режимов для индивидуальных предпринимателей",
+    "format": "VIDEO",
+    "durationMinutes": 25,
+    "level": "BEGINNER",
+    "topics": ["налоги", "финансы"],
+    "businessStages": ["IDEA", "LAUNCH"],
+    "spheres": [],
+    "paid": false,
+    "url": "https://example.com/materials/m-002"
+  },
+  {
+    "id": "m-003",
+    "title": "Масштабирование продаж",
+    "summary": "Курс о том, как выстроить отдел продаж, нанять первых менеджеров, настроить воронку и регулярный менеджмент. Разбираем найм, адаптацию, скрипты звонков, работу с возражениями, планирование и мотивацию команды, CRM, аналитику воронки, контроль качества звонков, обучение новичков, систему наставничества и то, как не потерять клиентов при росте компании в несколько раз за год.",
+    "format": "COURSE",
+    "durationMinutes": 240,
+    "level": "ADVANCED",
+    "topics": ["продажи", "управление"],
+    "businessStages": ["SCALING"],
+    "spheres": ["services"],
+    "paid": true,
+    "url": "https://example.com/materials/m-003"
+  },
+  {
+    "id": "m-004",
+    "title": "Шаблон финансовой модели",
+    "summary": "Таблица для расчёта юнит-экономики",
+    "format": "TEMPLATE",
+    "durationMinutes": 15,
+    "level": "INTERMEDIATE",
+    "topics": ["финансы"],
+    "businessStages": ["GROWTH"],
+    "spheres": [],
+    "paid": false,
+    "url": "https://example.com/materials/m-004"
+  },
+  {
+    "id": "",
+    "title": "Строка без идентификатора пропускается",
+    "url": "https://example.com/materials/skipped"
+  }
+]

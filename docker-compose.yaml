@@ -1,0 +1,18 @@
+# Infrastructure for running catalog-service on the host (IDE or mvn spring-boot:run).
+name: recommendation-system
+
+services:
+  catalog-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5437:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    volumes:
+      - catalog_db_data:/var/lib/postgresql/data
+
+volumes:
+  catalog_db_data:
