@@ -33,7 +33,7 @@ app:
   recommendations:
     items: ${RECOMMENDATION_ITEMS:6}
     max-candidates: 40
-    history-limit: 100
+    history-limit: 500
     cache-ttl: 30m
     fallback-cache-ttl: 2m
     catalog-ttl: 10m
