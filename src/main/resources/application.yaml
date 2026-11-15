@@ -1,9 +1,44 @@
 spring:
   application:
     name: recommendation-service
+  config:
+    # Local runs read secrets such as ANTHROPIC_API_KEY from .env (git-ignored); environment variables win
+    import: optional:file:.env[.properties]
   mvc:
     servlet:
       path: /api/v1
+  threads:
+    virtual:
+      enabled: true # an LLM call blocks for seconds
+  http:
+    clients:
+      connect-timeout: 2s
+      read-timeout: 5s
+  ai:
+    anthropic:
+      # Empty means no LLM: recommendations then come from the topic-match baseline
+      api-key: ${ANTHROPIC_API_KEY:}
+      timeout: ${ANTHROPIC_TIMEOUT:45s}
+      max-retries: 1
+      chat:
+        # Set explicitly: the Spring AI default is an older model
+        model: ${ANTHROPIC_MODEL:claude-sonnet-5-5}
+        max-tokens: 8000
+
+app:
+  services:
+    profile-url: ${PROFILE_SERVICE_URL:http://profile-service:8080}
+    catalog-url: ${CATALOG_SERVICE_URL:http://catalog-service:8080}
+    metric-url: ${METRIC_SERVICE_URL:http://metric-service:8080}
+  recommendations:
+    items: ${RECOMMENDATION_ITEMS:6}
+    max-candidates: 40
+    history-limit: 100
+    cache-ttl: 30m
+    fallback-cache-ttl: 2m
+    catalog-ttl: 10m
+    llm-effort: ${ANTHROPIC_EFFORT:medium}
+    llm-share: ${AB_LLM_SHARE:100}
 
 springdoc:
   api-docs:
