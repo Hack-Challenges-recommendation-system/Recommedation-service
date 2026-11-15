@@ -1,39 +1,64 @@
-# catalog-service
+# recommendation-service
 
-The catalog of educational materials from the case data, with Russian full-text search. Read-only for clients.
+Builds the personal list of materials. The vendor LLM chooses and explains; this service supplies the context, checks the answer and logs what was shown.
 
-**Read the shared guide first:** [AGENTS.md in Documentation](https://github.com/Hack-Challenges-recommendation-system/Documentation/blob/develop/AGENTS.md) covers the project, its architecture, the rules from the case (the case data and keys never go into git; this repository is public), the commit conventions and the conventions of the Java services. Locally it is `AGENTS.md` in your clone of the Documentation repository. This file adds only what is specific to catalog-service.
+**Read the shared guide first:** [AGENTS.md in Documentation](https://github.com/Hack-Challenges-recommendation-system/Documentation/blob/develop/AGENTS.md) covers the project, its architecture, the rules from the case (the case data and keys never go into git; this repository is public), the commit conventions and the conventions of the Java services. Locally it is `AGENTS.md` in your clone of the Documentation repository. This file adds only what is specific to recommendation-service.
 
-## How the catalog works
+## Stack
 
-- At startup `CatalogImporter` loads the file at `CATALOG_IMPORT_PATH` (e.g. `file:/data/catalog.json`) and upserts materials by `id`. An empty path skips the import.
-- The file is a JSON array of `MaterialImportDto`: `id`, `title`, `summary`, `format`, `durationMinutes`, `level`, `topics`, `businessStages`, `spheres`, `paid`, `url`. Rows without `id`, `title` or `url` are skipped.
-- **The case data has its own layout, which nobody has mapped yet.** Convert it to this format or add an adapter in `importer/`. Don't guess the field mapping; ask.
-- Paid materials: the importer cuts `summary` to 300 characters, so it can hold only a short benefit, and the API returns it with the provided `url`.
-- Search uses a generated `search_vector` column (`russian` configuration; title weight A, topics B, summary C) with a GIN index. A query matches any of its words (`plainto_tsquery` with `&` replaced by `|`) and is ranked by `ts_rank_cd`, so materials matching more words come first. This is the topic-match baseline the case compares recommendations against.
-- Anthropic has no embeddings API, so there is no vector search.
+- Spring AI 2.0.2 with `org.springframework.ai:spring-ai-starter-model-anthropic`, which runs on the official Anthropic Java SDK. Spring AI 2.0.2 is built against Spring Boot 4.1.2, which is why every service is on 4.1.2.
+- Model `claude-sonnet-5-5` at effort `medium`, the team's choice; `ANTHROPIC_MODEL` and `ANTHROPIC_EFFORT` change them. The key comes from `ANTHROPIC_API_KEY`. Never log or commit it.
+- `RestClient` calls to profile-, catalog- and metric-service live in `client/`, next to the usual layers. Caffeine holds the cache; WireMock stands in for the other services in tests.
 
-## Endpoints (under `/api/v1`, all public)
+## How a list is built
 
-| Method and path | What it does |
-|---|---|
-| `GET /materials` | Filters `format`, `stage`, `sphere`, `paid`; pages `page` (from 0) and `size` (1–500) |
-| `GET /materials/{id}` | One material; 404 if unknown |
-| `GET /materials/by-ids?ids=a&ids=b` | Up to 200 ids; keeps their order and skips unknown ones |
-| `GET /materials/search?q=...&stage=...&limit=...` | `q` up to 500 characters, `limit` 1–100; returns `{material, score}` |
-| `GET /health` | 200 |
+`GET /recommendations/me` (signed in) answers `{recommendationId, variant, engine, clarifyingQuestion, orderExplanation, items: [{material, reason, nextStep, position}]}`, the shape in frontend/AGENTS.md. `material.access` is `FREE`, `SUBSCRIPTION` or `PURCHASE`, as catalog-service gives it.
+
+1. **Context:** the profile from profile-service (`GET /profile/me` with the caller's `X-User-Id`) and the newest 500 events from metric-service (`GET /events/me`), so impressions don't push reactions out. Only `START`, `COMPLETE`, `LIKE` and `DISLIKE` count as history. A missing profile or history doesn't fail the request.
+2. **Candidates** (`CandidateService`), at most 40, each source with its share so history and popularity reach the LLM even when the goal matches more: materials sharing the rarest topics with the user's 3 most recent ones (`similarTo`, up to 20%), those often taken after them (`GET /metrics/materials/{id}/next`, up to 15%), catalog search on the goal together with the sphere (or the sphere alone), popular materials (`GET /metrics/materials/popular`, up to 10%), then materials for the user's stage and preferred formats, taking turns by topic. Completed materials and those whose latest reaction is a dislike are left out. `CatalogService` keeps the catalog in memory for 10 minutes.
+3. **Baseline order:** topic match with the goal, then "taken after", "similar to", stage, preferred format and popularity. The first 6 candidates in this order are the topic-match baseline the case compares against.
+4. **LLM** (`LlmRankingService`): the candidates with their signals and access, the business fields of the profile and the user's own history go to the model as JSON. Candidates get short ids (`c1`, `c2`…) that are turned back into material ids: a UUID copied back with one wrong character loses the pick. A JSON schema constrains the answer: ordered ids with a reason and a next step each, why the list goes in this order, and a clarifying question only when the goal is missing or vague.
+5. **Validation:** ids must be candidates and count once; at most 6 items. The material always comes from the catalog, so links and paid content are what catalog-service gives. A blank reason, next step or order explanation is written from the signals (`Explanations`); an empty profile gets a starter-set explanation.
+6. **Fallback:** without a key, or when the call fails, times out, is refused or doesn't match the schema, the answer is the baseline with `engine: baseline`, never a 500. Only a catalog outage with no cached catalog gives 503, and the frontend then shows catalog search.
+7. **Cache:** per user, variant, profile and history, 30 minutes for an LLM list and 2 minutes for a baseline list, so a failing LLM is retried soon. Every response gets a new `recommendationId`. Before a demo, open the recommendations of the demo personas once so they are cached.
+
+## A/B test
+
+- `ExperimentService` puts a user into `llm` or `baseline` by hashing the user id. `AB_LLM_SHARE` (default 100) is the percent in `llm`: set 50 for the experiment, keep 100 for demos.
+- `variant` is the assignment and `engine` is what built the list: an `llm` user whose call failed gets `variant: llm` and `engine: baseline`.
+- The frontend logs `IMPRESSION` and `CLICK` with `recommendationId`, `variant` and `position`. This service sends no events, so nothing is counted twice; metric-service reports per variant at `GET /metrics/experiment`.
+- Every served list is logged as `Recommendations are served`, with the user, the recommendation id, variant, engine, material ids, cache hit and latency.
+
+## What the LLM may receive
+
+- **Allowed:** public fields of the candidates, the business fields of the profile, the user's own history as material ids and titles, and aggregates such as how many users took a material.
+- **Never:** user ids, nicknames, emails or other personal data, the raw case data or other users' events, and the content of paid materials.
+- `ProfileServiceDto` doesn't even read the user id and nickname. `PersonalDataMasker` replaces emails and phone numbers in the goal and sphere with `[email]` and `[phone]`.
+
+## Spring AI with Claude Sonnet 5.5
+
+- Set `spring.ai.anthropic.chat.model` explicitly: the Spring AI default is `claude-haiku-4-5`.
+- Never set `temperature`, `top_p` or `top_k`, and never call `thinkingDisabled()` or `thinkingEnabled(budget)`: the model answers HTTP 400. Thinking stays adaptive.
+- Effort goes through `AnthropicChatOptions.builder().effort(...)` and the schema through `.outputSchema(...)`; both end up in one `output_config`.
+- Spring AI 2.0.2 can't send the server-side `fallbacks` parameter, so a refusal ends in the baseline.
+- `max-tokens` is 8000 and the timeout 45 s with 1 retry; the gateway gives recommendations 120 s. A live call with 8 candidates took about 6 s.
+- Answers aren't deterministic. For the comparison with the baseline, store the outputs and run each test profile 3 times.
 
 ## Configuration
 
 | Variable | Default |
 |---|---|
-| `DB_URL` | `jdbc:postgresql://localhost:5437/postgres` |
-| `DB_USERNAME`, `DB_PASSWORD` | `admin`, `admin` |
-| `CATALOG_IMPORT_PATH` | empty: no import |
+| `ANTHROPIC_API_KEY` | empty: baseline only |
+| `ANTHROPIC_MODEL`, `ANTHROPIC_EFFORT` | `claude-sonnet-5-5`, `medium` |
+| `ANTHROPIC_TIMEOUT` | `45s` |
+| `PROFILE_SERVICE_URL`, `CATALOG_SERVICE_URL`, `METRIC_SERVICE_URL` | `http://<service>:8080`, the compose names |
+| `RECOMMENDATION_ITEMS` | `6` |
+| `AB_LLM_SHARE` | `100` |
 
-`docker compose up -d` starts Postgres on `127.0.0.1:5437`.
+A local run reads `.env` from the working directory through `spring.config.import`; start from `.env.example`. `.env` is git-ignored and never goes into the image, and tests ignore its key.
 
 ## Tests
 
-- `CatalogIntegrationTest` imports the synthetic `src/test/resources/fixtures/catalog.json` into real Postgres. It checks Russian word forms, any-word matching, ranking, the stage filter, the paid summary, the order of `by-ids`, paging and validation.
-- `CatalogImporterTest` covers the import rules.
+- `RecommendationIntegrationTest`: WireMock stands in for profile-, catalog- and metric-service and the Anthropic API. It checks the request to the model (model, effort, schema, no sampling parameters, no user id, nickname or email), the validation of the answer, the cache and the baseline after an API error.
+- Units: `LlmRankingServiceTest`, `RecommendationServiceTest`, `CandidateServiceTest`, `ExperimentServiceTest`, `PersonalDataMaskerTest`. Web layer: `RecommendationControllerTest`.
+- `LiveAnthropicRankingTest` makes one real call and saves the answer to `target/live-llm-answer.json`. It costs money, so it runs only with `LIVE_LLM_TEST=true mvn -B -ntp test -Dtest=LiveAnthropicRankingTest` and a key in the environment or `.env`.

@@ -1,7 +1,9 @@
-app:
-  catalog:
-    import-path: classpath:fixtures/catalog.json
-
 logging:
   file:
     name: ""
+
+spring:
+  ai:
+    anthropic:
+      # Tests never reach the real API, even with a key in .env; tests that need the LLM set their own
+      api-key: ""

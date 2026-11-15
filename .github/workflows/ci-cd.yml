@@ -21,8 +21,8 @@ permissions:
   contents: read
 
 env:
-  SERVICE: catalog-service
-  IMAGE: ${{ vars.DOCKERHUB_USER }}/hackathon-recommendation-system-catalog-service
+  SERVICE: recommendation-service
+  IMAGE: ${{ vars.DOCKERHUB_USER }}/hackathon-recommendation-system-recommendation-service
 
 jobs:
   test:
@@ -34,7 +34,6 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: maven
-      # Integration tests start Postgres with Testcontainers on the runner's Docker.
       - run: mvn -B -ntp verify
 
   build:
