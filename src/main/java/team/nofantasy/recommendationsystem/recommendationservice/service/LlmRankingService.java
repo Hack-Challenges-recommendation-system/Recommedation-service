@@ -27,6 +27,7 @@ import team.nofantasy.recommendationsystem.recommendationservice.exception.LlmRa
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -131,26 +132,32 @@ public class LlmRankingService {
     private static final Pattern SHORT_ID = Pattern.compile("(?<![\\p{L}\\d])c\\d{1,3}(?![\\p{L}\\d])");
 
     private final ObjectProvider<ChatModel> chatModelProvider;
+    private final ObjectProvider<XrayTunnelService> tunnelProvider;
     private final JsonMapper jsonMapper;
     private final RecommendationTelemetry telemetry;
     private final String apiKey;
+    private final boolean localTestEndpoint;
     private final String model;
     private final int maxTokens;
     private final OutputConfig.Effort effort;
 
     public LlmRankingService(
             ObjectProvider<ChatModel> chatModelProvider,
+            ObjectProvider<XrayTunnelService> tunnelProvider,
             JsonMapper jsonMapper,
             RecommendationProperties properties,
             RecommendationTelemetry telemetry,
             @Value("${spring.ai.anthropic.api-key:}") String apiKey,
+            @Value("${spring.ai.anthropic.base-url:https://api.anthropic.com}") String baseUrl,
             @Value("${spring.ai.anthropic.chat.model}") String model,
             @Value("${spring.ai.anthropic.chat.max-tokens}") int maxTokens
     ) {
         this.chatModelProvider = chatModelProvider;
+        this.tunnelProvider = tunnelProvider;
         this.jsonMapper = jsonMapper;
         this.telemetry = telemetry;
         this.apiKey = apiKey;
+        this.localTestEndpoint = isLoopbackUrl(baseUrl);
         this.model = model;
         this.maxTokens = maxTokens;
         this.effort = OutputConfig.Effort.of(properties.llmEffort().strip().toLowerCase(Locale.ROOT));
@@ -166,7 +173,10 @@ public class LlmRankingService {
      * Whether the LLM can be asked; without a key it never is.
      */
     public boolean isAvailable() {
-        return StringUtils.hasText(apiKey) && chatModelProvider.getIfAvailable() != null;
+        XrayTunnelService tunnel = tunnelProvider.getIfAvailable();
+        return StringUtils.hasText(apiKey)
+                && chatModelProvider.getIfAvailable() != null
+                && (tunnel == null ? localTestEndpoint : tunnel.isReady());
     }
 
     /**
@@ -181,7 +191,9 @@ public class LlmRankingService {
             int items
     ) {
         ChatModel chatModel = chatModelProvider.getIfAvailable();
-        if (!StringUtils.hasText(apiKey) || chatModel == null) {
+        XrayTunnelService tunnel = tunnelProvider.getIfAvailable();
+        if (!StringUtils.hasText(apiKey) || chatModel == null
+                || (tunnel == null ? !localTestEndpoint : !tunnel.isReady())) {
             throw new LlmRankingException("The LLM is not configured");
         }
 
@@ -259,12 +271,26 @@ public class LlmRankingService {
      * Options of every call. Never sets temperature, top_p, top_k or a thinking budget: current models reject them.
      */
     AnthropicChatOptions options() {
-        return AnthropicChatOptions.builder()
+        AnthropicChatOptions.Builder builder = AnthropicChatOptions.builder()
                 .model(model)
                 .maxTokens(maxTokens)
                 .effort(effort)
-                .outputSchema(ANSWER_SCHEMA)
-                .build();
+                .outputSchema(ANSWER_SCHEMA);
+        XrayTunnelService tunnel = tunnelProvider.getIfAvailable();
+        if (tunnel != null) {
+            builder.proxy(tunnel.proxy());
+        }
+        return builder.build();
+    }
+
+    private static boolean isLoopbackUrl(String baseUrl) {
+        try {
+            String host = URI.create(baseUrl).getHost();
+            return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)
+                    || "::1".equals(host) || "[::1]".equals(host);
+        } catch (IllegalArgumentException error) {
+            return false;
+        }
     }
 
     LlmRequestServiceDto toRequest(
