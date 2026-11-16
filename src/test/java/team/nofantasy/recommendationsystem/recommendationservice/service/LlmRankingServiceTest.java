@@ -18,6 +18,8 @@ import team.nofantasy.recommendationsystem.recommendationservice.dto.service.rec
 import team.nofantasy.recommendationsystem.recommendationservice.exception.LlmRankingException;
 
 import java.time.Instant;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.util.List;
 import java.util.Map;
 
@@ -60,15 +62,64 @@ class LlmRankingServiceTest {
     );
 
     private LlmRankingService service(String apiKey) {
-        StaticListableBeanFactory beans = new StaticListableBeanFactory(Map.of("chatModel", chatModel));
+        return service(apiKey, null, "http://127.0.0.1:8089");
+    }
+
+    private LlmRankingService service(String apiKey, XrayTunnelService tunnel) {
+        return service(apiKey, tunnel, "https://api.anthropic.com");
+    }
+
+    private LlmRankingService service(String apiKey, XrayTunnelService tunnel, String baseUrl) {
+        StaticListableBeanFactory beans = new StaticListableBeanFactory(tunnel == null
+                ? Map.of("chatModel", chatModel)
+                : Map.of("chatModel", chatModel, "tunnel", tunnel));
         return new LlmRankingService(
                 beans.getBeanProvider(ChatModel.class),
+                beans.getBeanProvider(XrayTunnelService.class),
                 TestFixtures.JSON,
                 TestFixtures.properties(100),
+                mock(RecommendationTelemetry.class),
                 apiKey,
+                baseUrl,
                 "claude-sonnet-5-5",
                 8000
         );
+    }
+
+    @Test
+    void refusesToCallTheModelWhenTheTunnelIsDown() {
+        XrayTunnelService tunnel = mock(XrayTunnelService.class);
+        LlmRankingService ranker = service("key", tunnel);
+
+        assertThat(ranker.isAvailable()).isFalse();
+        assertThatThrownBy(() -> ranker.rank(PROFILE, List.of(), candidates, 6))
+                .isInstanceOf(LlmRankingException.class);
+        verifyNoInteractions(chatModel);
+    }
+
+    @Test
+    void refusesDirectRemoteCallsWithoutATunnel() {
+        LlmRankingService ranker = service("key", null, "https://api.anthropic.com");
+
+        assertThat(ranker.isAvailable()).isFalse();
+        assertThatThrownBy(() -> ranker.rank(PROFILE, List.of(), candidates, 6))
+                .isInstanceOf(LlmRankingException.class);
+        verifyNoInteractions(chatModel);
+    }
+
+    @Test
+    void placesTheSocksProxyOnEveryModelRequest() {
+        XrayTunnelService tunnel = mock(XrayTunnelService.class);
+        Proxy proxy = new Proxy(Proxy.Type.SOCKS, new InetSocketAddress("127.0.0.1", 23_456));
+        when(tunnel.isReady()).thenReturn(true);
+        when(tunnel.proxy()).thenReturn(proxy);
+        when(chatModel.call(any(Prompt.class))).thenReturn(response(ANSWER));
+
+        service("key", tunnel).rank(PROFILE, List.of(), candidates, 6);
+
+        ArgumentCaptor<Prompt> prompt = ArgumentCaptor.forClass(Prompt.class);
+        verify(chatModel).call(prompt.capture());
+        assertThat(((AnthropicChatOptions) prompt.getValue().getOptions()).getProxy()).isEqualTo(proxy);
     }
 
     private static ChatResponse response(String... texts) {
